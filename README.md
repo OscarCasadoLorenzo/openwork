@@ -51,34 +51,30 @@ All important data, decisions, and structural knowledge live in `.opencode/docs/
 ┌─────────────────────────────────────────────────────────┐
 │                   ORCHESTRATOR LAYER                     │
 │   Primary Build Agent  ·  AGENTS.md  ·  opencode.json   │
-│   Knows all subagents, routes tasks, validates outputs   │
+│    Direct access to MCP tools, formats user responses    │
 └──────────────────────────┬──────────────────────────────┘
-                           │  spawns via Task tool
+                           │ uses MCP tools directly
           ┌────────────────┼─────────────────┐
-          ▼                                   ▼
-┌─────────────────┐                 ┌─────────────────┐
-│  CONFLUENCE     │                 │  JIRA           │
-│  SUBAGENT       │                 │  SUBAGENT       │
-│  Child session  │                 │  Child session  │
-│  (isolated ctx) │                 │  (isolated ctx) │
-└────────┬────────┘                 └────────┬────────┘
-         │ loads on demand                   │ loads on demand
-         ▼                                   ▼
-┌─────────────────┐                 ┌─────────────────┐
-│  SKILL          │                 │  SKILL          │
-│  confluence-ops │                 │  jira-ops       │
-└────────┬────────┘                 └────────┬────────┘
-         │                                   │
-         └──────────────┬────────────────────┘
+          ▼                ▼                 ▼
+┌──────────────────────────────────────────────────────┐
+│                 MCP TOOL LAYER                        │
+│   confluence_datacenter_*  │  jira_datacenter_*      │
+│   atlassian_confluence_*   │  atlassian_jira_*       │
+└──────────────────────────┬───────────────────────────┘
+                           │
+                           ▼
+            ┌───────────────────────┐
+            │   MCP SERVERS          │
+            │   atlassian-datacenter │
+            │   mcp-atlassian        │
+            └───────────┬────────────┘
+                        │
                         ▼
             ┌───────────────────────┐
-            │   MCP LAYER           │
-            │   mcp-atlassian       │
-            │   Atlassian Cloud API │
+            │   ATLASSIAN APIs      │
+            │   Confluence & Jira   │
             └───────────────────────┘
 ```
-
-**Context isolation is native**: OpenCode spawns each subagent as a child session. The orchestrator receives only the final output — never the subagent's internal reasoning chain. No custom isolation code required.
 
 ### Repository Structure
 
@@ -127,9 +123,9 @@ Each acceptance criterion from the project brief, with its implementation mappin
 | # | Requirement | Status | Implementation |
 |---|---|---|---|
 | AC-1 | Validation flow for credentials, directories, and dependencies | Implemented | `scripts/validate.sh` — checks env vars, makes live API calls, verifies directory structure, checks Node.js availability |
-| AC-2 | Orchestrator agent aware of available subagents and their capabilities | Implemented | `AGENTS.md` + `opencode.json` `permission.task` registry + subagent `description` fields discoverable via OpenCode's Task tool |
-| AC-3 | Subagent context encapsulated, isolated from orchestrator context | Implemented (native) | OpenCode spawns subagents as child sessions; orchestrator only receives final output |
-| AC-4 | Deterministic workflows — operations finish as expected | Implemented | JSON output contracts in `.opencode/docs/contracts/` enforced by agent system prompts + `temperature: 0.1` on all subagents |
+| AC-2 | Orchestrator uses MCP tools directly for Atlassian integrations | Implemented | `AGENTS.md` + `opencode.json` with MCP tool namespace configuration (`confluence_datacenter_*`, `jira_datacenter_*`) |
+| AC-3 | Deterministic workflows — operations finish as expected | Implemented | Structured MCP tool responses + clear error handling patterns |
+| AC-4 | Deterministic workflows — operations finish as expected | Implemented | Structured MCP tool responses + clear error handling patterns |
 | AC-5 | OpenCode as the main tool | Implemented | All config lives in `.opencode/`; standard OpenCode conventions throughout |
 | AC-6 | GitHub Copilot enterprise licenses | Implemented | Model set to `github-copilot/claude-sonnet-4.5` in `opencode.json` |
 | AC-7 | Structured knowledge in dedicated folder, not monolithic AGENTS.md | Implemented | `.opencode/docs/` contains modular markdown per agent, JSON contracts, and ADRs; loaded via `instructions` glob in `opencode.json` |
@@ -144,21 +140,21 @@ All significant technical decisions made during the design phase, with rationale
 
 ### DEC-001 — Orchestrator is the Primary Build Agent
 
-**Decision**: The orchestrator is not a separate custom agent. It is OpenCode's built-in primary Build agent, configured via `AGENTS.md` and `opencode.json`.
+**Decision**: The orchestrator is OpenCode's built-in primary Build agent, configured via `AGENTS.md` and `opencode.json`. It uses MCP tools directly.
 
-**Rationale**: Creating a custom orchestrator agent adds no value when the build agent already has full tool access, can invoke all subagents via the Task tool, and has a configurable system prompt. Adding a layer would increase complexity without benefit.
+**Rationale**: The build agent has full MCP tool access and can directly call Atlassian APIs through MCP servers. A separate orchestration layer adds complexity without value.
 
-**Trade-off**: The orchestrator's context is the main session context. This is intentional — the orchestrator is meant to accumulate cross-agent knowledge within a session.
+**Trade-off**: The orchestrator's context accumulates across operations in a session. This is intentional for cross-tool knowledge sharing.
 
 ---
 
-### DEC-002 — Subagent Context Isolation via Native Child Sessions
+### DEC-002 — Direct MCP Tool Usage (Not Subagent Delegation)
 
-**Decision**: Rely entirely on OpenCode's native child session mechanism for context isolation. No custom isolation wrapper or proxy layer.
+**Decision**: The orchestrator calls MCP tools directly rather than delegating through subagents.
 
-**Rationale**: OpenCode's Task tool spawns subagents in isolated child sessions by design. The orchestrator receives only the subagent's final text output. This provides clean context boundaries for free.
+**Rationale**: MCP tools provide clean, structured interfaces. Adding a subagent delegation layer creates unnecessary complexity and context overhead.
 
-**Trade-off**: The orchestrator cannot inspect the subagent's intermediate reasoning. This is considered a feature, not a limitation — it enforces clean interfaces via output contracts.
+**Trade-off**: No isolated child sessions for Atlassian operations. All operations run in the orchestrator's context, which simplifies debugging and reduces latency.
 
 ---
 

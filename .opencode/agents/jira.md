@@ -36,6 +36,7 @@ Do NOT produce any text, explanation, or markdown outside of this JSON object. T
    - `list_sprints` — listing sprints for a board
    - `get_backlog` — retrieving the backlog for a project
    - `get_project` — retrieving project metadata
+   - `get_comments` — retrieving comments from an issue
 
 3. **Populate `summary`** on every successful response. Keep it under 3 sentences. It is the only natural-language field the orchestrator surfaces to the user.
 
