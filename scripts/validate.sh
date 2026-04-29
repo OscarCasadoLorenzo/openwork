@@ -5,10 +5,11 @@
 #
 # Checks:
 #   1. Required environment variables are set and non-empty
-#   2. Confluence Cloud API is reachable with the given credentials
-#   3. Jira Cloud API is reachable with the given credentials
+#   2. Confluence API is reachable (if configured)
+#   3. Jira API is reachable (Cloud or Data Center)
 #   4. Required .opencode/ directory structure is present
-#   5. Node.js is available (needed to run mcp-atlassian via npx)
+#   5. Node.js is available (needed to run MCP servers)
+#   6. Custom MCP server dependencies (if using Data Center)
 #
 # Usage:
 #   bash scripts/validate.sh
@@ -81,74 +82,94 @@ check_env_var() {
   fi
 }
 
-check_env_var "ATLASSIAN_URL" \
-  "Add it to your .env file. Format: https://your-jira-domain or https://your-org.atlassian.net"
-
-check_env_var "ATLASSIAN_EMAIL" \
-  "Add it to your .env file. Use the email linked to your Atlassian account."
-
-# Check for either PAT (self-hosted) or API token (Cloud)
-if [ -z "${ATLASSIAN_PAT:-}" ] && [ -z "${ATLASSIAN_API_TOKEN:-}" ]; then
-  fail "Neither ATLASSIAN_PAT nor ATLASSIAN_API_TOKEN is set" \
-    "For self-hosted Jira: Add ATLASSIAN_PAT to .env. For Cloud: Add ATLASSIAN_API_TOKEN"
+# Determine deployment type based on environment variables
+DEPLOYMENT_TYPE=""
+if [ -n "${JIRA_DC_URL:-}" ] && [ -n "${JIRA_DC_PAT:-}" ]; then
+  DEPLOYMENT_TYPE="datacenter"
+  info "Detected Jira Data Center deployment (self-hosted)"
+elif [ -n "${ATLASSIAN_URL:-}" ] && [ -n "${ATLASSIAN_API_TOKEN:-}" ]; then
+  DEPLOYMENT_TYPE="cloud"
+  info "Detected Atlassian Cloud deployment"
+elif [ -n "${ATLASSIAN_URL:-}" ] && [ -n "${ATLASSIAN_PAT:-}" ]; then
+  # Legacy: ATLASSIAN_PAT for Data Center
+  DEPLOYMENT_TYPE="datacenter-legacy"
+  info "Detected Jira Data Center deployment (legacy variable naming)"
 else
-  if [ -n "${ATLASSIAN_PAT:-}" ]; then
-    pass "ATLASSIAN_PAT is set (self-hosted Jira Data Center)"
-  else
-    pass "ATLASSIAN_API_TOKEN is set (Atlassian Cloud)"
-  fi
+  fail "Cannot determine deployment type" \
+    "For Cloud: Set ATLASSIAN_URL and ATLASSIAN_API_TOKEN. For Data Center: Set JIRA_DC_URL and JIRA_DC_PAT"
+  DEPLOYMENT_TYPE="unknown"
 fi
+
+# Validate based on deployment type
+case "${DEPLOYMENT_TYPE}" in
+  datacenter)
+    check_env_var "JIRA_DC_URL" \
+      "Add it to your .env file. Format: https://your-jira-domain (no trailing slash)"
+    check_env_var "JIRA_DC_PAT" \
+      "Generate a Personal Access Token in Jira: Profile > Personal Access Tokens"
+    
+    # SSL verification is optional, default to true
+    if [ -z "${JIRA_DC_SSL_VERIFY:-}" ]; then
+      info "JIRA_DC_SSL_VERIFY not set, defaulting to 'true'"
+    else
+      pass "JIRA_DC_SSL_VERIFY is set to '${JIRA_DC_SSL_VERIFY}'"
+    fi
+    ;;
+    
+  datacenter-legacy)
+    check_env_var "ATLASSIAN_URL" \
+      "Add it to your .env file. Format: https://your-jira-domain (no trailing slash)"
+    check_env_var "ATLASSIAN_PAT" \
+      "Generate a Personal Access Token in Jira: Profile > Personal Access Tokens"
+    
+    info "Consider migrating to JIRA_DC_* variable naming for clarity"
+    ;;
+    
+  cloud)
+    check_env_var "ATLASSIAN_URL" \
+      "Add it to your .env file. Format: https://your-org.atlassian.net (no trailing slash)"
+    check_env_var "ATLASSIAN_EMAIL" \
+      "Add it to your .env file. Use the email linked to your Atlassian account."
+    check_env_var "ATLASSIAN_API_TOKEN" \
+      "Generate an API token at: https://id.atlassian.com/manage-profile/security/api-tokens"
+    ;;
+    
+  unknown)
+    # Error already logged above, skip further checks
+    ;;
+esac
 
 # --------------------------------------------------------------------------
 # 2. Confluence API reachability
 # --------------------------------------------------------------------------
 header "2. Confluence API"
 
-if [ -n "${ATLASSIAN_URL:-}" ]; then
-  # Detect if this is Cloud or self-hosted based on URL pattern
-  if [[ "${ATLASSIAN_URL}" =~ \.atlassian\.net ]]; then
-    IS_CLOUD=true
+# Only check Confluence if we're in Cloud mode
+if [ "${DEPLOYMENT_TYPE}" = "cloud" ]; then
+  if [ -n "${ATLASSIAN_URL:-}" ] && [ -n "${ATLASSIAN_EMAIL:-}" ] && [ -n "${ATLASSIAN_API_TOKEN:-}" ]; then
     CONFLUENCE_ENDPOINT="${ATLASSIAN_URL}/wiki/rest/api/content?limit=1"
-    if [ -n "${ATLASSIAN_EMAIL:-}" ] && { [ -n "${ATLASSIAN_API_TOKEN:-}" ] || [ -n "${ATLASSIAN_PAT:-}" ]; }; then
-      HTTP_STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
-        --max-time 10 \
-        --user "${ATLASSIAN_EMAIL}:${ATLASSIAN_API_TOKEN}" \
-        "${CONFLUENCE_ENDPOINT}" 2>/dev/null || echo "000")
-    fi
-  else
-    IS_CLOUD=false
-    CONFLUENCE_ENDPOINT="${ATLASSIAN_URL}/wiki/rest/api/content?limit=1"
-    if [ -n "${ATLASSIAN_PAT:-}" ]; then
-      HTTP_STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
-        --max-time 10 \
-        -H "Authorization: Bearer ${ATLASSIAN_PAT}" \
-        "${CONFLUENCE_ENDPOINT}" 2>/dev/null || echo "000")
-    elif [ -n "${ATLASSIAN_API_TOKEN:-}" ]; then
-      HTTP_STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
-        --max-time 10 \
-        --user "${ATLASSIAN_EMAIL}:${ATLASSIAN_API_TOKEN}" \
-        "${CONFLUENCE_ENDPOINT}" 2>/dev/null || echo "000")
-    fi
-  fi
+    HTTP_STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
+      --max-time 10 \
+      --user "${ATLASSIAN_EMAIL}:${ATLASSIAN_API_TOKEN}" \
+      "${CONFLUENCE_ENDPOINT}" 2>/dev/null || echo "000")
 
-  if [ -n "${HTTP_STATUS:-}" ]; then
     case "${HTTP_STATUS}" in
       200)
         pass "Confluence API reachable (HTTP ${HTTP_STATUS})"
         ;;
       302)
-        info "Confluence returned HTTP 302 (redirect) — Confluence may not be installed. This is common for Jira-only instances."
+        info "Confluence returned HTTP 302 (redirect) — Confluence may not be installed. This is common for Jira-only Cloud instances."
         ;;
       401)
         fail "Confluence API returned HTTP 401 (Unauthorized)" \
-          "Check your credentials. For self-hosted: verify ATLASSIAN_PAT. For Cloud: verify ATLASSIAN_API_TOKEN."
+          "Check ATLASSIAN_EMAIL and ATLASSIAN_API_TOKEN in .env"
         ;;
       403)
         fail "Confluence API returned HTTP 403 (Forbidden)" \
-          "Your account may not have Confluence access. Contact your admin."
+          "Your account may not have Confluence access. Contact your Atlassian admin."
         ;;
       404)
-        info "Confluence returned HTTP 404 — Confluence may not be installed or uses a different path. This is common for Jira-only instances."
+        info "Confluence returned HTTP 404 — Confluence may not be installed. This is common for Jira-only Cloud instances."
         ;;
       000)
         fail "Confluence API is unreachable (connection failed)" \
@@ -156,14 +177,16 @@ if [ -n "${ATLASSIAN_URL:-}" ]; then
         ;;
       *)
         fail "Confluence API returned unexpected HTTP ${HTTP_STATUS}" \
-          "Investigate manually with appropriate curl command for your instance type."
+          "Investigate manually: curl -u \"\${ATLASSIAN_EMAIL}:\${ATLASSIAN_API_TOKEN}\" \"${CONFLUENCE_ENDPOINT}\""
         ;;
     esac
   else
-    info "Skipping Confluence API check — required env vars missing"
+    info "Skipping Confluence API check — required Cloud env vars missing"
   fi
+elif [ "${DEPLOYMENT_TYPE}" = "datacenter" ] || [ "${DEPLOYMENT_TYPE}" = "datacenter-legacy" ]; then
+  info "Skipping Confluence API check — Data Center deployment detected (Jira-only)"
 else
-  info "Skipping Confluence API check — ATLASSIAN_URL not set"
+  info "Skipping Confluence API check — deployment type unknown"
 fi
 
 # --------------------------------------------------------------------------
@@ -171,62 +194,92 @@ fi
 # --------------------------------------------------------------------------
 header "3. Jira API"
 
-if [ -n "${ATLASSIAN_URL:-}" ]; then
-  JIRA_ENDPOINT="${ATLASSIAN_URL}/rest/api/2/myself"
-  
-  # Detect if this is Cloud or self-hosted based on URL pattern
-  if [[ "${ATLASSIAN_URL}" =~ \.atlassian\.net ]]; then
-    if [ -n "${ATLASSIAN_EMAIL:-}" ] && [ -n "${ATLASSIAN_API_TOKEN:-}" ]; then
-      HTTP_STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
-        --max-time 10 \
-        --user "${ATLASSIAN_EMAIL}:${ATLASSIAN_API_TOKEN}" \
-        "${JIRA_ENDPOINT}" 2>/dev/null || echo "000")
+JIRA_URL=""
+JIRA_AUTH_HEADER=""
+CURL_OPTS="--silent --output /dev/null --write-out %{http_code} --max-time 10"
+
+case "${DEPLOYMENT_TYPE}" in
+  datacenter)
+    JIRA_URL="${JIRA_DC_URL}"
+    JIRA_ENDPOINT="${JIRA_URL}/rest/api/2/myself"
+    
+    # Handle SSL verification
+    if [ "${JIRA_DC_SSL_VERIFY:-true}" = "false" ]; then
+      CURL_OPTS="${CURL_OPTS} --insecure"
+      info "SSL verification disabled (JIRA_DC_SSL_VERIFY=false)"
     fi
-  else
+    
+    if [ -n "${JIRA_DC_PAT:-}" ]; then
+      HTTP_STATUS=$(curl ${CURL_OPTS} \
+        -H "Authorization: Bearer ${JIRA_DC_PAT}" \
+        "${JIRA_ENDPOINT}" 2>/dev/null || echo "000")
+    else
+      info "Skipping Jira API check — JIRA_DC_PAT not set"
+    fi
+    ;;
+    
+  datacenter-legacy)
+    JIRA_URL="${ATLASSIAN_URL}"
+    JIRA_ENDPOINT="${JIRA_URL}/rest/api/2/myself"
+    
     if [ -n "${ATLASSIAN_PAT:-}" ]; then
-      HTTP_STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
-        --max-time 10 \
+      HTTP_STATUS=$(curl ${CURL_OPTS} \
         -H "Authorization: Bearer ${ATLASSIAN_PAT}" \
         "${JIRA_ENDPOINT}" 2>/dev/null || echo "000")
-    elif [ -n "${ATLASSIAN_EMAIL:-}" ] && [ -n "${ATLASSIAN_API_TOKEN:-}" ]; then
-      HTTP_STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
-        --max-time 10 \
+    else
+      info "Skipping Jira API check — ATLASSIAN_PAT not set"
+    fi
+    ;;
+    
+  cloud)
+    JIRA_URL="${ATLASSIAN_URL}"
+    JIRA_ENDPOINT="${JIRA_URL}/rest/api/2/myself"
+    
+    if [ -n "${ATLASSIAN_EMAIL:-}" ] && [ -n "${ATLASSIAN_API_TOKEN:-}" ]; then
+      HTTP_STATUS=$(curl ${CURL_OPTS} \
         --user "${ATLASSIAN_EMAIL}:${ATLASSIAN_API_TOKEN}" \
         "${JIRA_ENDPOINT}" 2>/dev/null || echo "000")
+    else
+      info "Skipping Jira API check — required Cloud env vars missing"
     fi
-  fi
+    ;;
+    
+  *)
+    info "Skipping Jira API check — deployment type unknown"
+    ;;
+esac
 
-  if [ -n "${HTTP_STATUS:-}" ]; then
-    case "${HTTP_STATUS}" in
-      200)
-        pass "Jira API reachable (HTTP ${HTTP_STATUS})"
-        ;;
-      401)
+if [ -n "${HTTP_STATUS:-}" ]; then
+  case "${HTTP_STATUS}" in
+    200)
+      pass "Jira API reachable (HTTP ${HTTP_STATUS})"
+      ;;
+    401)
+      if [ "${DEPLOYMENT_TYPE}" = "cloud" ]; then
         fail "Jira API returned HTTP 401 (Unauthorized)" \
-          "Check your credentials. For self-hosted: verify ATLASSIAN_PAT. For Cloud: verify ATLASSIAN_API_TOKEN."
-        ;;
-      403)
-        fail "Jira API returned HTTP 403 (Forbidden)" \
-          "Your account may not have Jira access. Contact your admin."
-        ;;
-      404)
-        fail "Jira API returned HTTP 404 (Not Found)" \
-          "Check ATLASSIAN_URL is correct."
-        ;;
-      000)
-        fail "Jira API is unreachable (connection failed)" \
-          "Check ATLASSIAN_URL and your network connection."
-        ;;
-      *)
-        fail "Jira API returned unexpected HTTP ${HTTP_STATUS}" \
-          "Investigate manually with appropriate curl command for your instance type."
-        ;;
-    esac
-  else
-    info "Skipping Jira API check — required env vars missing"
-  fi
-else
-  info "Skipping Jira API check — ATLASSIAN_URL not set"
+          "Check ATLASSIAN_EMAIL and ATLASSIAN_API_TOKEN in .env"
+      else
+        fail "Jira API returned HTTP 401 (Unauthorized)" \
+          "Check JIRA_DC_PAT in .env. Ensure your PAT is valid and not expired."
+      fi
+      ;;
+    403)
+      fail "Jira API returned HTTP 403 (Forbidden)" \
+        "Your account may not have Jira access. Contact your Jira admin."
+      ;;
+    404)
+      fail "Jira API returned HTTP 404 (Not Found)" \
+        "Check ${DEPLOYMENT_TYPE} URL is correct: ${JIRA_URL}"
+      ;;
+    000)
+      fail "Jira API is unreachable (connection failed)" \
+        "Check ${DEPLOYMENT_TYPE} URL and your network connection: ${JIRA_URL}"
+      ;;
+    *)
+      fail "Jira API returned unexpected HTTP ${HTTP_STATUS}" \
+        "Investigate manually: curl -H \"Authorization: Bearer \${JIRA_DC_PAT}\" \"${JIRA_ENDPOINT}\""
+      ;;
+  esac
 fi
 
 # --------------------------------------------------------------------------
@@ -264,12 +317,18 @@ check_dir ".opencode/docs/contracts"  "JSON output contracts"
 check_dir ".opencode/docs/decisions"  "architecture decision records"
 check_dir "scripts"               "utility scripts"
 
+# Check for custom MCP server if Data Center deployment
+if [ "${DEPLOYMENT_TYPE}" = "datacenter" ]; then
+  check_dir ".opencode/mcp-servers" "custom MCP servers"
+  check_dir ".opencode/mcp-servers/atlassian-datacenter" "Jira Data Center MCP server"
+fi
+
 check_file ".env.example"         "credential contract template"
 check_file ".opencode/opencode.json" "central OpenCode config"
 check_file "AGENTS.md"            "orchestrator rules"
 
 # --------------------------------------------------------------------------
-# 5. Node.js availability
+# 5. Runtime dependencies
 # --------------------------------------------------------------------------
 header "5. Runtime dependencies"
 
@@ -277,14 +336,14 @@ if command -v node &>/dev/null; then
   NODE_VERSION=$(node --version 2>/dev/null || echo "unknown")
   NODE_MAJOR=$(echo "${NODE_VERSION}" | sed 's/v\([0-9]*\).*/\1/')
   if [ "${NODE_MAJOR}" -ge 18 ] 2>/dev/null; then
-    pass "Node.js available (${NODE_VERSION}) — required for mcp-atlassian"
+    pass "Node.js available (${NODE_VERSION}) — required for MCP servers"
   else
     fail "Node.js ${NODE_VERSION} is too old (need ≥ 18)" \
       "Install Node.js 18 or later: https://nodejs.org"
   fi
 else
   fail "Node.js is not installed" \
-    "Install Node.js 18 or later: https://nodejs.org — required to run mcp-atlassian via npx."
+    "Install Node.js 18 or later: https://nodejs.org — required to run MCP servers"
 fi
 
 if command -v curl &>/dev/null; then
@@ -292,6 +351,27 @@ if command -v curl &>/dev/null; then
 else
   fail "curl is not installed" \
     "Install curl: brew install curl (macOS) or apt install curl (Linux)"
+fi
+
+# Additional checks for Data Center deployment
+if [ "${DEPLOYMENT_TYPE}" = "datacenter" ]; then
+  if command -v pnpm &>/dev/null; then
+    PNPM_VERSION=$(pnpm --version 2>/dev/null || echo "unknown")
+    pass "pnpm available (${PNPM_VERSION}) — required for custom MCP server"
+  else
+    fail "pnpm is not installed" \
+      "Install pnpm: npm install -g pnpm — required to run custom Jira Data Center MCP server"
+  fi
+  
+  # Check if custom MCP server has dependencies installed
+  if [ -f ".opencode/mcp-servers/atlassian-datacenter/package.json" ]; then
+    if [ -d ".opencode/mcp-servers/atlassian-datacenter/node_modules" ]; then
+      pass "Jira Data Center MCP server dependencies installed"
+    else
+      fail "Jira Data Center MCP server dependencies not installed" \
+        "Run: cd .opencode/mcp-servers/atlassian-datacenter && pnpm install"
+    fi
+  fi
 fi
 
 # --------------------------------------------------------------------------
