@@ -82,54 +82,88 @@ check_env_var() {
 }
 
 check_env_var "ATLASSIAN_URL" \
-  "Add it to your .env file. Format: https://your-org.atlassian.net"
+  "Add it to your .env file. Format: https://your-jira-domain or https://your-org.atlassian.net"
 
 check_env_var "ATLASSIAN_EMAIL" \
   "Add it to your .env file. Use the email linked to your Atlassian account."
 
-check_env_var "ATLASSIAN_API_TOKEN" \
-  "Generate one at: https://id.atlassian.com/manage-profile/security/api-tokens"
+# Check for either PAT (self-hosted) or API token (Cloud)
+if [ -z "${ATLASSIAN_PAT:-}" ] && [ -z "${ATLASSIAN_API_TOKEN:-}" ]; then
+  fail "Neither ATLASSIAN_PAT nor ATLASSIAN_API_TOKEN is set" \
+    "For self-hosted Jira: Add ATLASSIAN_PAT to .env. For Cloud: Add ATLASSIAN_API_TOKEN"
+else
+  if [ -n "${ATLASSIAN_PAT:-}" ]; then
+    pass "ATLASSIAN_PAT is set (self-hosted Jira Data Center)"
+  else
+    pass "ATLASSIAN_API_TOKEN is set (Atlassian Cloud)"
+  fi
+fi
 
 # --------------------------------------------------------------------------
 # 2. Confluence API reachability
 # --------------------------------------------------------------------------
 header "2. Confluence API"
 
-if [ -n "${ATLASSIAN_URL:-}" ] && [ -n "${ATLASSIAN_EMAIL:-}" ] && [ -n "${ATLASSIAN_API_TOKEN:-}" ]; then
-  CONFLUENCE_ENDPOINT="${ATLASSIAN_URL}/wiki/rest/api/content?limit=1"
+if [ -n "${ATLASSIAN_URL:-}" ]; then
+  # Detect if this is Cloud or self-hosted based on URL pattern
+  if [[ "${ATLASSIAN_URL}" =~ \.atlassian\.net ]]; then
+    IS_CLOUD=true
+    CONFLUENCE_ENDPOINT="${ATLASSIAN_URL}/wiki/rest/api/content?limit=1"
+    if [ -n "${ATLASSIAN_EMAIL:-}" ] && { [ -n "${ATLASSIAN_API_TOKEN:-}" ] || [ -n "${ATLASSIAN_PAT:-}" ]; }; then
+      HTTP_STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
+        --max-time 10 \
+        --user "${ATLASSIAN_EMAIL}:${ATLASSIAN_API_TOKEN}" \
+        "${CONFLUENCE_ENDPOINT}" 2>/dev/null || echo "000")
+    fi
+  else
+    IS_CLOUD=false
+    CONFLUENCE_ENDPOINT="${ATLASSIAN_URL}/wiki/rest/api/content?limit=1"
+    if [ -n "${ATLASSIAN_PAT:-}" ]; then
+      HTTP_STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
+        --max-time 10 \
+        -H "Authorization: Bearer ${ATLASSIAN_PAT}" \
+        "${CONFLUENCE_ENDPOINT}" 2>/dev/null || echo "000")
+    elif [ -n "${ATLASSIAN_API_TOKEN:-}" ]; then
+      HTTP_STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
+        --max-time 10 \
+        --user "${ATLASSIAN_EMAIL}:${ATLASSIAN_API_TOKEN}" \
+        "${CONFLUENCE_ENDPOINT}" 2>/dev/null || echo "000")
+    fi
+  fi
 
-  HTTP_STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
-    --max-time 10 \
-    --user "${ATLASSIAN_EMAIL}:${ATLASSIAN_API_TOKEN}" \
-    "${CONFLUENCE_ENDPOINT}" 2>/dev/null || echo "000")
-
-  case "${HTTP_STATUS}" in
-    200)
-      pass "Confluence API reachable (HTTP ${HTTP_STATUS})"
-      ;;
-    401)
-      fail "Confluence API returned HTTP 401 (Unauthorized)" \
-        "Check ATLASSIAN_EMAIL and ATLASSIAN_API_TOKEN are correct."
-      ;;
-    403)
-      fail "Confluence API returned HTTP 403 (Forbidden)" \
-        "Your account may not have Confluence access. Contact your Atlassian admin."
-      ;;
-    404)
-      fail "Confluence API returned HTTP 404 (Not Found)" \
-        "Check ATLASSIAN_URL is correct. Expected format: https://your-org.atlassian.net"
-      ;;
-    000)
-      fail "Confluence API is unreachable (connection failed)" \
-        "Check ATLASSIAN_URL and your network connection."
-      ;;
-    *)
-      fail "Confluence API returned unexpected HTTP ${HTTP_STATUS}" \
-        "Investigate manually: curl -u \$ATLASSIAN_EMAIL:\$ATLASSIAN_API_TOKEN ${CONFLUENCE_ENDPOINT}"
-      ;;
-  esac
+  if [ -n "${HTTP_STATUS:-}" ]; then
+    case "${HTTP_STATUS}" in
+      200)
+        pass "Confluence API reachable (HTTP ${HTTP_STATUS})"
+        ;;
+      302)
+        info "Confluence returned HTTP 302 (redirect) — Confluence may not be installed. This is common for Jira-only instances."
+        ;;
+      401)
+        fail "Confluence API returned HTTP 401 (Unauthorized)" \
+          "Check your credentials. For self-hosted: verify ATLASSIAN_PAT. For Cloud: verify ATLASSIAN_API_TOKEN."
+        ;;
+      403)
+        fail "Confluence API returned HTTP 403 (Forbidden)" \
+          "Your account may not have Confluence access. Contact your admin."
+        ;;
+      404)
+        info "Confluence returned HTTP 404 — Confluence may not be installed or uses a different path. This is common for Jira-only instances."
+        ;;
+      000)
+        fail "Confluence API is unreachable (connection failed)" \
+          "Check ATLASSIAN_URL and your network connection."
+        ;;
+      *)
+        fail "Confluence API returned unexpected HTTP ${HTTP_STATUS}" \
+          "Investigate manually with appropriate curl command for your instance type."
+        ;;
+    esac
+  else
+    info "Skipping Confluence API check — required env vars missing"
+  fi
 else
-  info "Skipping Confluence API check — required env vars missing"
+  info "Skipping Confluence API check — ATLASSIAN_URL not set"
 fi
 
 # --------------------------------------------------------------------------
@@ -137,41 +171,62 @@ fi
 # --------------------------------------------------------------------------
 header "3. Jira API"
 
-if [ -n "${ATLASSIAN_URL:-}" ] && [ -n "${ATLASSIAN_EMAIL:-}" ] && [ -n "${ATLASSIAN_API_TOKEN:-}" ]; then
+if [ -n "${ATLASSIAN_URL:-}" ]; then
   JIRA_ENDPOINT="${ATLASSIAN_URL}/rest/api/2/myself"
+  
+  # Detect if this is Cloud or self-hosted based on URL pattern
+  if [[ "${ATLASSIAN_URL}" =~ \.atlassian\.net ]]; then
+    if [ -n "${ATLASSIAN_EMAIL:-}" ] && [ -n "${ATLASSIAN_API_TOKEN:-}" ]; then
+      HTTP_STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
+        --max-time 10 \
+        --user "${ATLASSIAN_EMAIL}:${ATLASSIAN_API_TOKEN}" \
+        "${JIRA_ENDPOINT}" 2>/dev/null || echo "000")
+    fi
+  else
+    if [ -n "${ATLASSIAN_PAT:-}" ]; then
+      HTTP_STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
+        --max-time 10 \
+        -H "Authorization: Bearer ${ATLASSIAN_PAT}" \
+        "${JIRA_ENDPOINT}" 2>/dev/null || echo "000")
+    elif [ -n "${ATLASSIAN_EMAIL:-}" ] && [ -n "${ATLASSIAN_API_TOKEN:-}" ]; then
+      HTTP_STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
+        --max-time 10 \
+        --user "${ATLASSIAN_EMAIL}:${ATLASSIAN_API_TOKEN}" \
+        "${JIRA_ENDPOINT}" 2>/dev/null || echo "000")
+    fi
+  fi
 
-  HTTP_STATUS=$(curl --silent --output /dev/null --write-out "%{http_code}" \
-    --max-time 10 \
-    --user "${ATLASSIAN_EMAIL}:${ATLASSIAN_API_TOKEN}" \
-    "${JIRA_ENDPOINT}" 2>/dev/null || echo "000")
-
-  case "${HTTP_STATUS}" in
-    200)
-      pass "Jira API reachable (HTTP ${HTTP_STATUS})"
-      ;;
-    401)
-      fail "Jira API returned HTTP 401 (Unauthorized)" \
-        "Check ATLASSIAN_EMAIL and ATLASSIAN_API_TOKEN are correct."
-      ;;
-    403)
-      fail "Jira API returned HTTP 403 (Forbidden)" \
-        "Your account may not have Jira access. Contact your Atlassian admin."
-      ;;
-    404)
-      fail "Jira API returned HTTP 404 (Not Found)" \
-        "Check ATLASSIAN_URL is correct. Expected format: https://your-org.atlassian.net"
-      ;;
-    000)
-      fail "Jira API is unreachable (connection failed)" \
-        "Check ATLASSIAN_URL and your network connection."
-      ;;
-    *)
-      fail "Jira API returned unexpected HTTP ${HTTP_STATUS}" \
-        "Investigate manually: curl -u \$ATLASSIAN_EMAIL:\$ATLASSIAN_API_TOKEN ${JIRA_ENDPOINT}"
-      ;;
-  esac
+  if [ -n "${HTTP_STATUS:-}" ]; then
+    case "${HTTP_STATUS}" in
+      200)
+        pass "Jira API reachable (HTTP ${HTTP_STATUS})"
+        ;;
+      401)
+        fail "Jira API returned HTTP 401 (Unauthorized)" \
+          "Check your credentials. For self-hosted: verify ATLASSIAN_PAT. For Cloud: verify ATLASSIAN_API_TOKEN."
+        ;;
+      403)
+        fail "Jira API returned HTTP 403 (Forbidden)" \
+          "Your account may not have Jira access. Contact your admin."
+        ;;
+      404)
+        fail "Jira API returned HTTP 404 (Not Found)" \
+          "Check ATLASSIAN_URL is correct."
+        ;;
+      000)
+        fail "Jira API is unreachable (connection failed)" \
+          "Check ATLASSIAN_URL and your network connection."
+        ;;
+      *)
+        fail "Jira API returned unexpected HTTP ${HTTP_STATUS}" \
+          "Investigate manually with appropriate curl command for your instance type."
+        ;;
+    esac
+  else
+    info "Skipping Jira API check — required env vars missing"
+  fi
 else
-  info "Skipping Jira API check — required env vars missing"
+  info "Skipping Jira API check — ATLASSIAN_URL not set"
 fi
 
 # --------------------------------------------------------------------------
