@@ -1,0 +1,341 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "jira-response",
+  "title": "Jira Subagent Response",
+  "description": "The mandatory output contract for the Jira subagent. Every response MUST be a valid JSON object matching this schema. No free-form text is permitted outside this structure.",
+  "type": "object",
+  "required": ["status", "operation"],
+  "additionalProperties": false,
+
+  "properties": {
+
+    "status": {
+      "type": "string",
+      "enum": ["success", "error", "partial"],
+      "description": "Outcome of the operation. 'partial' means results were returned but some items were inaccessible."
+    },
+
+    "operation": {
+      "type": "string",
+      "enum": [
+        "search_issues",
+        "get_issue",
+        "list_epics",
+        "list_sprints",
+        "get_backlog",
+        "get_project"
+      ],
+      "description": "The Jira operation that was performed."
+    },
+
+    "error": {
+      "type": "object",
+      "description": "Present only when status is 'error'. Describes what went wrong.",
+      "required": ["code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "AUTH_FAILED",
+            "NOT_FOUND",
+            "PERMISSION_DENIED",
+            "RATE_LIMITED",
+            "NETWORK_ERROR",
+            "INVALID_JQL",
+            "UNKNOWN"
+          ],
+          "description": "Machine-readable error category."
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable description of the error."
+        },
+        "remediation": {
+          "type": "string",
+          "description": "Suggested action for the user or orchestrator to resolve the error."
+        }
+      }
+    },
+
+    "summary": {
+      "type": "string",
+      "description": "A concise natural-language summary of the results, suitable for display to the user. Required when status is 'success' or 'partial'."
+    },
+
+    "issues": {
+      "type": "array",
+      "description": "List of Jira issues returned by the operation.",
+      "items": {
+        "type": "object",
+        "required": ["key", "summary", "url", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Jira issue key (e.g. 'PLATFORM-123')."
+          },
+          "summary": {
+            "type": "string",
+            "description": "Issue title/summary."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Full URL to the issue in Jira Cloud."
+          },
+          "status": {
+            "type": "string",
+            "description": "Current workflow status of the issue (e.g. 'To Do', 'In Progress', 'Done')."
+          },
+          "issue_type": {
+            "type": "string",
+            "description": "Type of Jira issue (e.g. 'Story', 'Bug', 'Task', 'Epic', 'Sub-task')."
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["Highest", "High", "Medium", "Low", "Lowest"],
+            "description": "Issue priority."
+          },
+          "assignee": {
+            "type": ["string", "null"],
+            "description": "Display name of the assignee, or null if unassigned."
+          },
+          "reporter": {
+            "type": "string",
+            "description": "Display name of the issue reporter."
+          },
+          "project_key": {
+            "type": "string",
+            "description": "Key of the Jira project this issue belongs to."
+          },
+          "project_name": {
+            "type": "string",
+            "description": "Display name of the Jira project."
+          },
+          "epic_key": {
+            "type": ["string", "null"],
+            "description": "Key of the parent epic, or null if not part of an epic."
+          },
+          "epic_name": {
+            "type": ["string", "null"],
+            "description": "Name of the parent epic, or null if not part of an epic."
+          },
+          "sprint": {
+            "type": ["string", "null"],
+            "description": "Name of the current sprint, or null if not in a sprint."
+          },
+          "labels": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Labels applied to this issue."
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp when the issue was created."
+          },
+          "updated": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp of the last update."
+          },
+          "description": {
+            "type": ["string", "null"],
+            "description": "Issue description text. Only populated for get_issue operations."
+          },
+          "story_points": {
+            "type": ["number", "null"],
+            "description": "Story points estimate, or null if not estimated."
+          }
+        }
+      }
+    },
+
+    "epics": {
+      "type": "array",
+      "description": "List of epics returned by list_epics operations.",
+      "items": {
+        "type": "object",
+        "required": ["key", "name", "url", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Epic issue key."
+          },
+          "name": {
+            "type": "string",
+            "description": "Epic name."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Full URL to the epic in Jira Cloud."
+          },
+          "status": {
+            "type": "string",
+            "description": "Current workflow status of the epic."
+          },
+          "assignee": {
+            "type": ["string", "null"],
+            "description": "Display name of the epic owner, or null if unassigned."
+          },
+          "child_issue_count": {
+            "type": "integer",
+            "description": "Total number of issues linked to this epic."
+          }
+        }
+      }
+    },
+
+    "sprints": {
+      "type": "array",
+      "description": "List of sprints returned by list_sprints operations.",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "state"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Jira sprint ID."
+          },
+          "name": {
+            "type": "string",
+            "description": "Sprint name."
+          },
+          "state": {
+            "type": "string",
+            "enum": ["active", "future", "closed"],
+            "description": "Current state of the sprint."
+          },
+          "start_date": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "Sprint start date."
+          },
+          "end_date": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "Sprint end date."
+          },
+          "goal": {
+            "type": ["string", "null"],
+            "description": "Sprint goal."
+          }
+        }
+      }
+    },
+
+    "project": {
+      "type": "object",
+      "description": "Project metadata returned by get_project operations.",
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Jira project key."
+        },
+        "name": {
+          "type": "string",
+          "description": "Project display name."
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Full URL to the project in Jira Cloud."
+        },
+        "lead": {
+          "type": "string",
+          "description": "Display name of the project lead."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["scrum", "kanban", "business"],
+          "description": "Project type/methodology."
+        },
+        "description": {
+          "type": ["string", "null"],
+          "description": "Project description."
+        }
+      }
+    },
+
+    "pagination": {
+      "type": "object",
+      "description": "Pagination metadata. Present when the operation returned paginated results.",
+      "additionalProperties": false,
+      "properties": {
+        "total": {
+          "type": "integer",
+          "description": "Total number of matching results (across all pages)."
+        },
+        "returned": {
+          "type": "integer",
+          "description": "Number of results included in this response."
+        },
+        "has_more": {
+          "type": "boolean",
+          "description": "True if additional results exist beyond what was returned."
+        },
+        "start_at": {
+          "type": "integer",
+          "description": "Zero-based index of the first result in this response."
+        }
+      }
+    }
+  },
+
+  "if": {
+    "properties": { "status": { "const": "success" } }
+  },
+  "then": {
+    "required": ["summary"]
+  },
+
+  "examples": [
+    {
+      "status": "success",
+      "operation": "search_issues",
+      "summary": "Found 2 open critical bugs in the PLATFORM project.",
+      "issues": [
+        {
+          "key": "PLATFORM-456",
+          "summary": "Payment service returns 500 on checkout",
+          "url": "https://your-org.atlassian.net/browse/PLATFORM-456",
+          "status": "In Progress",
+          "issue_type": "Bug",
+          "priority": "High",
+          "assignee": "Oscar Casado",
+          "reporter": "Jane Smith",
+          "project_key": "PLATFORM",
+          "project_name": "Platform Engineering",
+          "epic_key": "PLATFORM-400",
+          "epic_name": "Q3 Reliability Improvements",
+          "sprint": "Platform Sprint 12",
+          "labels": ["critical", "payment"],
+          "created": "2025-04-20T09:00:00Z",
+          "updated": "2025-04-27T14:30:00Z",
+          "description": null,
+          "story_points": 3
+        }
+      ],
+      "pagination": {
+        "total": 2,
+        "returned": 2,
+        "has_more": false,
+        "start_at": 0
+      }
+    },
+    {
+      "status": "error",
+      "operation": "search_issues",
+      "error": {
+        "code": "INVALID_JQL",
+        "message": "The JQL query contains a syntax error near 'assigneed'.",
+        "remediation": "Check the JQL syntax. Common mistake: 'assignee' not 'assigneed'. See Jira JQL documentation for reference."
+      }
+    }
+  ]
+}

@@ -1,0 +1,218 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "confluence-response",
+  "title": "Confluence Subagent Response",
+  "description": "The mandatory output contract for the Confluence subagent. Every response MUST be a valid JSON object matching this schema. No free-form text is permitted outside this structure.",
+  "type": "object",
+  "required": ["status", "operation"],
+  "additionalProperties": false,
+
+  "properties": {
+
+    "status": {
+      "type": "string",
+      "enum": ["success", "error", "partial"],
+      "description": "Outcome of the operation. 'partial' means results were returned but some pages/spaces were inaccessible."
+    },
+
+    "operation": {
+      "type": "string",
+      "enum": ["search", "get_page", "list_space", "list_children", "get_metadata"],
+      "description": "The Confluence operation that was performed."
+    },
+
+    "error": {
+      "type": "object",
+      "description": "Present only when status is 'error'. Describes what went wrong.",
+      "required": ["code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "AUTH_FAILED",
+            "NOT_FOUND",
+            "PERMISSION_DENIED",
+            "RATE_LIMITED",
+            "NETWORK_ERROR",
+            "INVALID_QUERY",
+            "UNKNOWN"
+          ],
+          "description": "Machine-readable error category."
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable description of the error."
+        },
+        "remediation": {
+          "type": "string",
+          "description": "Suggested action for the user or orchestrator to resolve the error."
+        }
+      }
+    },
+
+    "summary": {
+      "type": "string",
+      "description": "A concise natural-language summary of the results, suitable for display to the user. Required when status is 'success' or 'partial'."
+    },
+
+    "pages": {
+      "type": "array",
+      "description": "List of Confluence pages returned by the operation.",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "url"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Confluence page ID."
+          },
+          "title": {
+            "type": "string",
+            "description": "Page title."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Full URL to the page in Confluence Cloud."
+          },
+          "space_key": {
+            "type": "string",
+            "description": "Key of the Confluence space the page belongs to."
+          },
+          "space_name": {
+            "type": "string",
+            "description": "Display name of the Confluence space."
+          },
+          "author": {
+            "type": "string",
+            "description": "Display name of the page author."
+          },
+          "last_updated": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp of the last page update."
+          },
+          "version": {
+            "type": "integer",
+            "description": "Current version number of the page."
+          },
+          "excerpt": {
+            "type": "string",
+            "description": "Short excerpt or summary of the page content. Maximum 500 characters."
+          },
+          "content": {
+            "type": "string",
+            "description": "Full extracted text content of the page. Only populated for get_page operations."
+          },
+          "labels": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Labels applied to this page."
+          }
+        }
+      }
+    },
+
+    "spaces": {
+      "type": "array",
+      "description": "List of Confluence spaces returned by a list_space operation.",
+      "items": {
+        "type": "object",
+        "required": ["key", "name", "url"],
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Confluence space key (e.g. 'ENG', 'PLATFORM')."
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name of the space."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Full URL to the space in Confluence Cloud."
+          },
+          "description": {
+            "type": "string",
+            "description": "Space description."
+          },
+          "type": {
+            "type": "string",
+            "enum": ["global", "personal"],
+            "description": "Space type."
+          }
+        }
+      }
+    },
+
+    "pagination": {
+      "type": "object",
+      "description": "Pagination metadata. Present when the operation returned paginated results.",
+      "additionalProperties": false,
+      "properties": {
+        "total": {
+          "type": "integer",
+          "description": "Total number of matching results (across all pages)."
+        },
+        "returned": {
+          "type": "integer",
+          "description": "Number of results included in this response."
+        },
+        "has_more": {
+          "type": "boolean",
+          "description": "True if additional results exist beyond what was returned."
+        },
+        "next_start": {
+          "type": "integer",
+          "description": "Start index to use for the next page of results."
+        }
+      }
+    }
+  },
+
+  "if": {
+    "properties": { "status": { "const": "success" } }
+  },
+  "then": {
+    "required": ["summary"]
+  },
+
+  "examples": [
+    {
+      "status": "success",
+      "operation": "search",
+      "summary": "Found 3 pages matching 'quarterly planning' in the Engineering space.",
+      "pages": [
+        {
+          "id": "123456",
+          "title": "Q3 2025 Engineering Planning",
+          "url": "https://your-org.atlassian.net/wiki/spaces/ENG/pages/123456",
+          "space_key": "ENG",
+          "space_name": "Engineering",
+          "author": "Jane Smith",
+          "last_updated": "2025-04-01T10:00:00Z",
+          "version": 5,
+          "excerpt": "This page outlines the Q3 2025 engineering objectives and key results..."
+        }
+      ],
+      "pagination": {
+        "total": 3,
+        "returned": 3,
+        "has_more": false
+      }
+    },
+    {
+      "status": "error",
+      "operation": "search",
+      "error": {
+        "code": "AUTH_FAILED",
+        "message": "Confluence returned HTTP 401 Unauthorized.",
+        "remediation": "Check that ATLASSIAN_EMAIL and ATLASSIAN_API_TOKEN are correct, then re-run bash scripts/validate.sh."
+      }
+    }
+  ]
+}
