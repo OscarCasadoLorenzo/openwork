@@ -1,0 +1,159 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Model
+  // Default model for the orchestrator (primary build agent).
+  // Subagents inherit this model unless they override it in their own config.
+  // Run `opencode models` to verify the exact ID available on your Copilot licence.
+  // ─────────────────────────────────────────────────────────────────────────
+  "model": "github-copilot/claude-sonnet-4.5",
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Instructions
+  // All files matched here are loaded into every session as additional context.
+  // This replaces a monolithic AGENTS.md — each concern has its own file.
+  // ─────────────────────────────────────────────────────────────────────────
+  "instructions": [
+    ".opencode/docs/README.md",
+    ".opencode/docs/agents/*.md",
+    ".opencode/docs/decisions/*.md"
+  ],
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // MCP Servers
+  // mcp-atlassian provides Confluence and Jira tools via Atlassian Cloud REST API.
+  // Credentials are injected from environment variables — never hardcoded.
+  // ─────────────────────────────────────────────────────────────────────────
+  "mcp": {
+    "atlassian": {
+      "type": "local",
+      "command": ["npx", "-y", "mcp-atlassian"],
+      "enabled": true,
+      "timeout": 10000,
+      "environment": {
+        // Confluence
+        "CONFLUENCE_URL": "{env:ATLASSIAN_URL}",
+        "CONFLUENCE_USERNAME": "{env:ATLASSIAN_EMAIL}",
+        "CONFLUENCE_API_TOKEN": "{env:ATLASSIAN_API_TOKEN}",
+        // Jira
+        "JIRA_URL": "{env:ATLASSIAN_URL}",
+        "JIRA_USERNAME": "{env:ATLASSIAN_EMAIL}",
+        "JIRA_API_TOKEN": "{env:ATLASSIAN_API_TOKEN}"
+      }
+    }
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Global tool permissions
+  // Atlassian MCP tools are denied globally and enabled per-agent below.
+  // This enforces least privilege: the Confluence agent cannot call Jira
+  // tools and vice versa, and the orchestrator cannot call either directly.
+  // ─────────────────────────────────────────────────────────────────────────
+  "permission": {
+    "bash": "allow",
+    "edit": "allow",
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "webfetch": "allow",
+    "task": "allow",
+    // Deny all Atlassian MCP tools at the global level.
+    // Per-agent permission blocks below re-grant only the specific namespace
+    // each subagent needs (confluence-only or jira-only). The orchestrator
+    // inherits this deny and is never granted any Atlassian tool directly.
+    "atlassian_*": "deny"
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Agent registry
+  // ─────────────────────────────────────────────────────────────────────────
+  "agent": {
+
+    // ── Orchestrator ────────────────────────────────────────────────────────
+    // The primary build agent acts as orchestrator.
+    // It can spawn any registered subagent via the Task tool.
+    // It cannot call Atlassian tools directly — it must delegate to subagents.
+    "build": {
+      "model": "github-copilot/claude-sonnet-4.5",
+      "permission": {
+        "task": {
+          "confluence": "allow",
+          "jira": "allow",
+          "git-committer": "allow",
+          "general": "allow",
+          "explore": "allow",
+          "*": "deny"
+        },
+        // Deny all Atlassian tools for the orchestrator — force delegation
+        "atlassian_*": "deny"
+      }
+    },
+
+    // ── Confluence subagent ──────────────────────────────────────────────────
+    // Defined in detail in .opencode/agents/confluence.md
+    // Enabled Atlassian tools: confluence namespace only
+    "confluence": {
+      "model": "github-copilot/claude-sonnet-4.5",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "task": "deny",
+        "webfetch": "deny",
+        "skill": {
+          "confluence-ops": "allow",
+          "*": "deny"
+        },
+        // Grant only Confluence-scoped MCP tools
+        "atlassian_confluence_*": "allow",
+        "atlassian_jira_*": "deny",
+        "atlassian_*": "deny"
+      }
+    },
+
+    // ── Jira subagent ────────────────────────────────────────────────────────
+    // Defined in detail in .opencode/agents/jira.md
+    // Enabled Atlassian tools: jira namespace only
+    "jira": {
+      "model": "github-copilot/claude-sonnet-4.5",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "task": "deny",
+        "webfetch": "deny",
+        "skill": {
+          "jira-ops": "allow",
+          "*": "deny"
+        },
+        // Grant only Jira-scoped MCP tools
+        "atlassian_jira_*": "allow",
+        "atlassian_confluence_*": "deny",
+        "atlassian_*": "deny"
+      }
+    },
+
+    // ── Git Committer subagent ───────────────────────────────────────────────
+    // Defined in detail in .opencode/agents/git-committer.md
+    // Autonomous Git commit assistant with Conventional Commits + GitFlow
+    "git-committer": {
+      "model": "github-copilot/claude-sonnet-4.5",
+      "temperature": 0.2,
+      "permission": {
+        "edit": "deny",
+        "bash": "allow",
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "task": "deny",
+        "webfetch": "deny",
+        "skill": {
+          "*": "deny"
+        },
+        // No Atlassian tools needed for local Git operations
+        "atlassian_*": "deny"
+      }
+    }
+  }
+}
