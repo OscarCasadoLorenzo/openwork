@@ -22,34 +22,27 @@ All files here are source-of-truth documentation, committed to git.
 │   └── jira-response.schema.json         ← JSON output contract for Jira subagent
 └── decisions/
     └── ADR-001-architecture.md           ← Architecture Decision Record #1
+
+(root)/docs/
+└── (test documentation and reports)
 ```
 
 ---
 
-## Subagent Registry
+## MCP Tool Registry
 
-| Agent ID | Invocation | Purpose | Contract |
-|---|---|---|---|
-| `confluence` | `@confluence` / Task tool | Read and search Confluence Cloud | `contracts/confluence-response.schema.json` |
-| `jira` | `@jira` / Task tool | Read and query Jira Cloud | `contracts/jira-response.schema.json` |
-| `git-committer` | `@git-committer` | Autonomous Git commit assistant with Conventional Commits + GitFlow | N/A (local utility agent) |
+| Tool Namespace | Purpose | Used For |
+|---|---|---|
+| `confluence_datacenter_*` | Read and search Confluence Data Center | Documentation, runbooks, specs, architecture decisions |
+| `jira_datacenter_*` | Read and query Jira Data Center | Issues, epics, sprints, project status, backlogs |
+| `atlassian_confluence_*` | Confluence Cloud (via mcp-atlassian) | Alternative Confluence Cloud access |
+| `atlassian_jira_*` | Jira Cloud (via mcp-atlassian) | Alternative Jira Cloud access |
 
----
-
-## Output Contract Protocol
-
-Every subagent returns a JSON object. The orchestrator MUST:
-
-1. Attempt to parse the output as JSON
-2. Check `result.status`:
-   - `"success"` → proceed, use `result.summary` for the user-facing response
-   - `"partial"` → proceed with caveat, note limitations from `result.summary`
-   - `"error"` → surface `result.error.message` to the user and suggest `result.error.remediation`
-3. Never fabricate data if parsing fails — report the raw output as an error
+**Note**: The orchestrator has direct access to all MCP tools and uses them based on the user's request context
 
 ---
 
-## Adding a New Subagent
+## Adding a New Integration
 
 Follow the extension pattern documented in `README.md` at the repository root.
-When a new subagent is added, create its knowledge doc in `docs/agents/` and its contract in `docs/contracts/`.
+When adding a new integration, document the MCP tool namespace and usage patterns.

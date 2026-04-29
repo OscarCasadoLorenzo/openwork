@@ -33,13 +33,13 @@
       "timeout": 10000,
       "environment": {
         // Confluence
-        "CONFLUENCE_URL": "{env:ATLASSIAN_URL}",
-        "CONFLUENCE_USERNAME": "{env:ATLASSIAN_EMAIL}",
-        "CONFLUENCE_API_TOKEN": "{env:ATLASSIAN_API_TOKEN}",
+        "CONFLUENCE_URL": "{env:CONFLUENCE_URL}",
+        "CONFLUENCE_USERNAME": "{env:CONFLUENCE_EMAIL}",
+        "CONFLUENCE_API_TOKEN": "{env:CONFLUENCE_API_TOKEN}",
         // Jira
         "JIRA_URL": "{env:ATLASSIAN_URL}",
         "JIRA_USERNAME": "{env:ATLASSIAN_EMAIL}",
-        "JIRA_API_TOKEN": "{env:ATLASSIAN_API_TOKEN}"
+        "JIRA_API_TOKEN": "{env:ATLASSIAN_PAT}"
       }
     },
     "atlassian-datacenter": {
@@ -59,16 +59,19 @@
       "environment": {
         "JIRA_URL": "{env:JIRA_DC_URL}",
         "JIRA_PAT": "{env:JIRA_DC_PAT}",
-        "JIRA_SSL_VERIFY": "{env:JIRA_DC_SSL_VERIFY}"
+        "JIRA_SSL_VERIFY": "{env:JIRA_DC_SSL_VERIFY}",
+        "CONFLUENCE_URL": "{env:CONFLUENCE_URL}",
+        "CONFLUENCE_PAT": "{env:CONFLUENCE_PAT}",
+        "CONFLUENCE_SSL_VERIFY": "{env:CONFLUENCE_SSL_VERIFY}"
       }
     }
   },
 
   // ─────────────────────────────────────────────────────────────────────────
   // Global tool permissions
-  // Atlassian MCP tools are denied globally and enabled per-agent below.
-  // This enforces least privilege: the Confluence agent cannot call Jira
-  // tools and vice versa, and the orchestrator cannot call either directly.
+  // Per DEC-002: Orchestrator uses Confluence Data Center MCP tools directly.
+  // Read-only enforcement is at usage policy level (AGENTS.md instructions).
+  // For production: consider MCP permission granularity to deny write tools.
   // ─────────────────────────────────────────────────────────────────────────
   "permission": {
     "bash": "allow",
@@ -78,12 +81,11 @@
     "grep": "allow",
     "webfetch": "allow",
     "task": "allow",
-    // Deny all Atlassian MCP tools at the global level.
-    // Per-agent permission blocks below re-grant only the specific namespace
-    // each subagent needs (confluence-only or jira-only). The orchestrator
-    // inherits this deny and is never granted any Atlassian tool directly.
+    // Allow Confluence Data Center tools for orchestrator (DEC-002)
+    "confluence_datacenter_*": "allow",
+    // Deny Atlassian Cloud tools (not used in this environment)
     "atlassian_*": "deny",
-    // Deny the custom Data Center tools globally; only jira subagent gets them.
+    // Deny Jira Data Center tools at global level (enabled only for jira agent)
     "jira_datacenter_*": "deny"
   },
 
@@ -114,7 +116,7 @@
 
     // ── Confluence subagent ──────────────────────────────────────────────────
     // Defined in detail in .opencode/agents/confluence.md
-    // Enabled Atlassian tools: confluence namespace only
+    // Enabled Atlassian tools: confluence namespace from Data Center MCP server
     "confluence": {
       "model": "github-copilot/claude-sonnet-4.5",
       "temperature": 0.1,
@@ -127,8 +129,10 @@
           "confluence-ops": "allow",
           "*": "deny"
         },
-        // Grant only Confluence-scoped MCP tools
-        "atlassian_confluence_*": "allow",
+        // Grant Confluence Data Center MCP tools
+        "confluence_datacenter_*": "allow",
+        // Deny Cloud tools (from mcp-atlassian)
+        "atlassian_confluence_*": "deny",
         "atlassian_jira_*": "deny",
         "atlassian_*": "deny"
       }

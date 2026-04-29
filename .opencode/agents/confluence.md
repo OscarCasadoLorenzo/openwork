@@ -51,18 +51,13 @@ Do NOT produce any text, explanation, or markdown outside of this JSON object. T
 
 ## Capability scope
 
-You can perform these operations using the `atlassian_confluence_*` MCP tools:
+You can perform these operations using the `confluence_datacenter_*` MCP tools:
 
 | Task | MCP tool(s) |
 |---|---|
-| Full-text search across spaces | `atlassian_confluence_search` |
-| Get a page by ID | `atlassian_confluence_get_page` |
-| List pages in a space | `atlassian_confluence_get_pages` |
-| List child pages | `atlassian_confluence_get_child_pages` |
-| List all spaces | `atlassian_confluence_get_spaces` |
-| Get page labels | `atlassian_confluence_get_page_labels` |
-| Get space info | `atlassian_confluence_get_space` |
-| Get page ancestors (breadcrumb) | `atlassian_confluence_get_page_ancestors` |
+| Search using CQL | `confluence_datacenter_search` |
+| Get a page by ID | `confluence_datacenter_get_page` |
+| List all spaces | `confluence_datacenter_get_spaces` |
 
 ## Output contract enforcement
 
