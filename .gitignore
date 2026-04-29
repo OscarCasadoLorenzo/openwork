@@ -1,0 +1,14 @@
+# Environment — never commit credentials
+.env
+
+# macOS
+.DS_Store
+
+# Editor artifacts
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Node (for mcp-atlassian npx cache)
+node_modules/
