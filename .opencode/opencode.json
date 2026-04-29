@@ -41,6 +41,26 @@
         "JIRA_USERNAME": "{env:ATLASSIAN_EMAIL}",
         "JIRA_API_TOKEN": "{env:ATLASSIAN_API_TOKEN}"
       }
+    },
+    "atlassian-datacenter": {
+      "type": "local",
+      // pnpm exec finds the local tsx binary without shell initialisation.
+      // Absolute path to pnpm avoids PATH lookup issues when OpenCode spawns the server.
+      "command": [
+        "/opt/homebrew/bin/pnpm",
+        "--dir",
+        ".opencode/mcp-servers/atlassian-datacenter",
+        "exec",
+        "tsx",
+        "src/server.ts"
+      ],
+      "enabled": true,
+      "timeout": 30000,
+      "environment": {
+        "JIRA_URL": "{env:JIRA_DC_URL}",
+        "JIRA_PAT": "{env:JIRA_DC_PAT}",
+        "JIRA_SSL_VERIFY": "{env:JIRA_DC_SSL_VERIFY}"
+      }
     }
   },
 
@@ -62,7 +82,9 @@
     // Per-agent permission blocks below re-grant only the specific namespace
     // each subagent needs (confluence-only or jira-only). The orchestrator
     // inherits this deny and is never granted any Atlassian tool directly.
-    "atlassian_*": "deny"
+    "atlassian_*": "deny",
+    // Deny the custom Data Center tools globally; only jira subagent gets them.
+    "jira_datacenter_*": "deny"
   },
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -127,10 +149,11 @@
           "jira-ops": "allow",
           "*": "deny"
         },
-        // Grant only Jira-scoped MCP tools
+        // Grant only Jira-scoped MCP tools (Cloud and Data Center)
         "atlassian_jira_*": "allow",
         "atlassian_confluence_*": "deny",
-        "atlassian_*": "deny"
+        "atlassian_*": "deny",
+        "jira_datacenter_*": "allow"
       }
     },
 

@@ -23,7 +23,8 @@
         "list_epics",
         "list_sprints",
         "get_backlog",
-        "get_project"
+        "get_project",
+        "get_comments"
       ],
       "description": "The Jira operation that was performed."
     },
